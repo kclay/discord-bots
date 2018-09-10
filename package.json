@@ -1,0 +1,13 @@
+{
+  "name": "destiny-gunsmith",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node ./bin/www"
+  },
+  "dependencies": {
+    "discord-akairo": "^7.5.5",
+    "discord.js": "^11.4.2",
+    "dotenv": "^6.0.0"
+  }
+}
