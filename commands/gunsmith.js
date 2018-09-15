@@ -1,6 +1,7 @@
 const {Command} = require('discord-akairo');
 const _ = require('lodash');
 const Bungie = require('../common/bungie');
+const Manifest = require('../common/manifest');
 
 
 const consts = require('../common/constants');
@@ -9,15 +10,23 @@ class GunsmithCommand extends Command {
 
     constructor() {
         super('gunsmith', {
-
+            aliases: ['gunsmith'],
             args: [
+
                 {
-                    id: 'platform',
-                    type: ['none', 'string']
-                },
-                {
-                    id: 'member',
-                    type: ['none', 'member'],
+                    id: 'handle',
+                    type: function (word, message, prevArgs) {
+                        if (!word) return null;
+                        const id = word.match(/<@!?(\d+)>/);
+                        if (!id) return 'word';
+                        return message.guild.members.get(id[1]);
+                    },
+                    match: (message, prevArgs) => {
+                        const peak = message.content.split(' ')[1];
+                        if (consts.PLATFORM_TYPES.includes(peak)) return 'none';
+                        if (consts.ALL_SLOTS.includes(peak)) return 'none';
+                        return 'word';
+                    },
                     /**
                      *
                      * @param {Message} message
@@ -26,13 +35,17 @@ class GunsmithCommand extends Command {
                     default: message => message.member
                 },
                 {
+                    id: 'platform',
+                    type: [...consts.PLATFORM_TYPES]
+                },
+                {
                     id: 'slot',
                     type: [...consts.ALL_SLOTS]
                 }
             ]
         });
 
-        this.bungie = new Bungie(process.env.BUNGIE_API_KEY)
+        this.bungie = new Bungie(new Manifest(process.env.DB))
     }
 
     _isWeaponSlot(slot) {
@@ -44,12 +57,9 @@ class GunsmithCommand extends Command {
     }
 
     async exec(message, args) {
-        const network = await this.resolveNetwork(args.member, args.platform);
-        if (!network) {
-            return false;
-        }
+        const network = await this.resolveNetwork(args.handle, args.platform);
 
-        let player = await this.resolvePlayer(network, args.member);
+        let player = await this.resolvePlayer(network, args.handle);
         if (this.isError(player)) {
             return false;
         }
@@ -77,25 +87,26 @@ class GunsmithCommand extends Command {
     /**
      *
      * @param network
-     * @param member
-     * @param name
+     * @param handleOrMember
      * @return {Promise<UserInfoCard>}
      */
-    async resolvePlayer(network, member, name) {
+    async resolvePlayer(network, handleOrMember) {
 
-        let profileName = this.resolveName(name || member.user.name);
-
-        let player = await this.getBungiePlayerProfile(network, profileName);
-        if (!this.isError(player)) {
+        const isMember = !_.isString(handleOrMember);
+        const member = isMember ? handleOrMember : null;
+        const handle = !isMember ? handleOrMember : null;
+        let profileName = this.parseName(handle || member.user.username);
+        let player;
+        if (member && member.nickname) {
+            const network = this.parseNetwork(member.nickname) || network;
+            profileName = this.parseName(member.nickname);
+            player = await this.getBungiePlayerProfile(network, profileName);
+        }
+        if (player && !this.isError(player)) {
             return player;
         }
-
-        if (member.nickname) {
-            const networkFromNickname = this.parseNetwork(member.nickname) || network;
-            player = await this.getBungiePlayerProfile(network, networkFromNickname);
-        }
+        player = await this.getBungiePlayerProfile(network, profileName);
         return player;
-
     }
 
     async try(fn) {
@@ -107,7 +118,7 @@ class GunsmithCommand extends Command {
     }
 
     isError(e) {
-        return e instanceof Error;
+        return e && e instanceof Error;
     }
 
     /**
@@ -128,7 +139,7 @@ class GunsmithCommand extends Command {
 
     /**
      *
-     * @param {GuildMember} member
+     * @param {GuildMember|string} member
      * @param {?string} platform
      */
     resolveNetwork(member, platform) {
@@ -136,13 +147,18 @@ class GunsmithCommand extends Command {
         if (platform) {
             network = this._resolveNetworkType(platform);
         } else {
-            network = this.parseNetwork(member.nickname);
+            if (_.isString(member)) {
+                network = this.parseNetwork(member)
+            } else {
+                network = this.parseNetwork(member.nickname)
+            }
+
         }
         return network;
     }
 
     parseNetwork(name) {
-        let parts = name.split('[');
+        let parts = (name || '').split('[');
         if (parts.length > 1) {
             let network = parts[1].replace(']', '').trim();
             network = network.toLowerCase().trim();
@@ -166,7 +182,9 @@ class GunsmithCommand extends Command {
         return Promise.all([
             this.getBungiePlayerProfile(1, name),
             this.getBungiePlayerProfile(2, name)
-        ])
+        ]).then((results) => {
+            return results.filter(card => !!card)[0];
+        })
     }
 
     /**
@@ -175,7 +193,7 @@ class GunsmithCommand extends Command {
      * @param membershipType
      * @return {Promise<UserInfoCard>}
      */
-    getBungiePlayerProfile(name, membershipType) {
+    getBungiePlayerProfile(membershipType, name) {
         if (membershipType === consts.NETWORK_TYPES.XBOX) {
             name = name.split('_').join(' ');
         }

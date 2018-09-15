@@ -2,15 +2,19 @@ const {GunsmithError} = require('./common');
 const request = require('request-promise');
 const consts = require('./constants');
 const destiny = require('bungie-api-ts/destiny2');
-const {DestinyComponentType} = require('bungie-api-ts/destiny2');
+const {DestinyComponentType} = consts;
 const {stringify} = require('querystring');
 const httpAdapter = require('../common/bungieHttpAdapter');
 
 
 class Bungie {
 
-    constructor(apiKey) {
-        this.apiKey = apiKey;
+    /**
+     *
+     * @param {Manifest} manifest
+     */
+    constructor(manifest) {
+        this.manifest = manifest;
     }
 
 
@@ -18,18 +22,84 @@ class Bungie {
      *
      * @param {DestinyCharacterResponse} character
      * @param {DestinyItemComponent} item
-     * @return {PromiseLike<T> | Promise<T>}
+     * @return {{name: *, description: *, itemTypeName: *, color: number, iconLink: string, itemLink: string, talentGrid: DestinyItemTalentGridComponent, damageType: *, stats}}
      */
     getItemDetails(character, item) {
         const itemComponents = character.itemComponents;
-        const instances = itemComponents.instances.data;
-        const perks = itemComponents.perks.data;
-        const renderData = itemComponents.renderData.data;
-        const stats = itemComponents.stats.data;
+        const instance = itemComponents.instances.data[item.itemInstanceId];
+        const perksDescriptor = itemComponents.perks.data[item.itemInstanceId];
+        const statsDescriptors = itemComponents.stats.data[item.itemInstanceId];
+        const socketDescriptors = itemComponents.sockets.data[item.itemInstanceId];
+        const talentGrid = itemComponents.talentGrids.data[item.itemInstanceId];
 
-        const instance = instances[item.itemInstanceId];
 
-        const damageTypeName = consts.BUCKET_TO_TYPE[instance.damageTypeHash];
+        const itemDef = this.manifest.inventoryItem(item.itemHash);
+
+        const stats = {};
+        for (let descriptor of Object.values(statsDescriptors)) {
+            const statDef = this.manifest.stats(descriptor.statHash);
+            stats[statDef.name] = descriptor.value;
+        }
+        const perks = {};
+
+        for (let descriptor of perksDescriptor.perks) {
+            if (!descriptor.visible || !descriptor.isActive) continue;
+            const perkDef = this.manifest.perks(descriptor.perkHash);
+            perks[perkDef.name] = perkDef.name;
+        }
+
+        const sockets = [];
+
+        for (let descriptor of socketDescriptors.sockets) {
+            let plugDef = this.manifest.plugs(descriptor.plugHash);
+            if (!plugDef) continue;
+            if (plugDef.plug.plugCategoryIdentifier === 'shader') continue;
+            const plugs = [];
+            for (let plugHash of descriptor.reusablePlugHashes) {
+                plugDef = this.manifest.plugs(plugHash);
+                let masterwork = false;
+                if (plugDef.plug.plugCategoryIdentifier.includes('masterworks.')) {
+                    masterwork = {
+                        name: plugDef.plug.plugCategoryIdentifier.split('.').pop(),
+                        tier: plugDef.displayProperties.name
+                    }
+                }
+
+                const plug = {
+                    perks: (plugDef.perks || perksDescriptor.perks).filter(perk => !!perk.iconPath).map(perk => perk.perkHash)
+                        .map(perkHash => this.manifest.perks(perkHash)),
+                    active: plugDef.hash === descriptor.plugHash,
+                    name: plugDef.displayProperties.name,
+                    masterwork
+                };
+                plugs.push(plug);
+            }
+            sockets.push(plugs);
+
+        }
+
+        const damageTypeDef = this.manifest.damageType(instance.damageTypeHash);
+        const damageName = instance
+            ? [null, 'kinetic', 'arc', 'solar', 'void', 'raid'][instance.damageType || 0]
+            : null;
+        let prefix = 'https://www.bungie.net';
+        let iconSuffix = itemDef.icon;
+        let itemSuffix = `/en/Armory/Detail?item=${hash}`;
+
+        return {
+            name: itemDef.name,
+            description: itemDef.description,
+            itemTypeName: consts.BUCKET_TO_TYPE[item.bucketHash],
+            color: parseInt(consts.DAMAGE_COLOR[damageTypeDef.name], 16),
+            iconLink: prefix + iconSuffix,
+            itemLink: prefix + itemSuffix,
+            talentGrid,
+            damageName,
+            stats,
+            sockets
+        }
+
+
     }
 
 
@@ -48,7 +118,7 @@ class Bungie {
             displayName,
             membershipType
         });
-        this.validateResponse(response, new GunsmithError(`Could not find guardian with name: ${displayName} on ${networkName}.`));
+        this.validateResponse(response, new GunsmithError(`Could not find guardian with name: ${displayName}`));
         return response.Response[0];
     }
 
@@ -90,8 +160,10 @@ class Bungie {
             characterId: character.characterId,
             destinyMembershipId: character.membershipId,
             membershipType: character.membershipType,
-            components: [DestinyComponentType.CharacterEquipment, DestinyComponentType.ItemInstances,
-                DestinyComponentType.ItemPerks, DestinyComponentType.ItemRenderData,
+            components: [DestinyComponentType.CharacterEquipment,
+                DestinyComponentType.ItemInstances,
+                DestinyComponentType.ItemPerks,
+                DestinyComponentType.ItemSockets,
                 DestinyComponentType.ItemTalentGrids,
                 DestinyComponentType.ItemStats]
         });

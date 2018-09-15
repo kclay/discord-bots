@@ -6,7 +6,10 @@ const client = new AkairoClient({
     prefix: (process.env.DISCORD_PREFIX || '!').split(','), // or ['?', '!']
     commandDirectory: './commands/',
     commandUtil: true,
-    handleEdits: true
+    handleEdits: true,
+    listenerDirectory: './listeners/'
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN).then(() => {
+    console.log('up!')
+});

@@ -1,9 +1,60 @@
 const sqlite = require('sqlite');
+const NodeCache = require("node-cache");
+const _ = require('lodash')
+
+/**
+ * @typedef {object} DisplayProperties
+ * @property string description
+ * @property string name
+ * @property string icon
+ */
+
+class Definition {
+
+
+    /**
+     *
+     * @param {Manifest} manifest
+     * @param {string} name
+     * @param {boolean=} loadAll
+     */
+    constructor(manifest, name, loadAll) {
+
+        this.manifest = manifest;
+        this.name = name;
+        this.table = `Destiny${name}Definition`;
+        this.cache = {};
+        this.loadAll = loadAll;
+
+    }
+
+    get(id, compact) {
+        if (this.loadAll && !this.cache.loaded) {
+            this.cache = this.manifest.getAllRecords(this.table);
+        }
+        let record = this.cache[id];
+        if (!record) {
+            record = this.cache[id] = this.manifest.getRecord(this.table, id);
+        }
+        if (compact) {
+            return record.displayProperties;
+        }
+        return record;
+
+    }
+}
 
 class Manifest {
 
     constructor(path) {
 
+        this.defs = {
+            DamageType: new Definition(this, 'DamageType'),
+            InventoryItem: new Definition(this, 'InventoryItem'),
+            Stats: new Definition(this, 'Stat'),
+            Perks: new Definition(this, 'SandboxPerk', true)
+
+        };
         sqlite.open(path).then(db => {
             /**
              *
@@ -11,20 +62,57 @@ class Manifest {
              */
             this.db = db;
         })
+        this.makeStatement = _.memoize((table) => {
+            return this.db.prepare(`select json from ${table} where id = ?`);
+        });
     }
 
     /**
      *
-     * @param {DamageType} id
-     * @return {{displayProperties:{name:string,icon:string}}}
+     * @param id
+     * @return {*}
      */
-    damageType(id) {
-        return this.getRecord('DestinyDamageTypeDefinition', id)
+
+    plugs(id) {
+        return this.defs.InventoryItem.get(id);
     }
 
-    makeStatement = _.memoize((table) => {
-        return this.db.prepare(`select json from ${table} where id = ?`);
-    });
+    /**
+     *
+     * @param  id
+     * @return {DisplayProperties}
+     */
+    damageType(id) {
+        return this.defs.DamageType.get(id, true);
+    }
+
+    /**
+     *
+     * @param id
+     * @return {*}
+     */
+    inventoryItem(id) {
+        return this.defs.InventoryItem.get(id);
+    }
+
+    /**
+     *
+     * @param id
+     * @return {DisplayProperties}
+     */
+    stats(id) {
+        return this.defs.Stats.get(id, true);
+    }
+
+    /**
+     *
+     * @param id
+     * @return {DisplayProperties}
+     */
+    perks(id) {
+        return this.defs.Perks.get(id, true);
+    }
+
 
     getRecord(table, id) {
         const statement = this.makeStatement(table);
@@ -49,3 +137,5 @@ class Manifest {
         return result;
     }
 }
+
+module.exports = Manifest;

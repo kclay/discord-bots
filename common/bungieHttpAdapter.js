@@ -4,18 +4,20 @@
  * @return {Request}
  */
 
-import {stringify} from "querystring";
+const {stringify} = require("querystring");
+const request = require('request-promise');
 
 const httpAdapter = async (config) => {
     let url = config.url;
     if (config.params) {
         url = `${url}?${stringify(config.params)}`;
     }
+
     return request({
         url: url,
         body: JSON.stringify(config.body),
         headers: {
-            'X-API-Key': this.apiKey,
+            'X-API-Key': process.env.BUNGIE_API_KEY,
             'Content-Type': 'application/json'
         },
         json: true,
