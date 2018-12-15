@@ -28,15 +28,15 @@ class Definition {
 
     }
 
-    get(id, compact) {
-        if (this.loadAll && !this.cache.loaded) {
-            this.cache = this.manifest.getAllRecords(this.table);
+    async get(id, compact) {
+        if (this.loadAll && !this.cache.length) {
+            this.cache = await this.manifest.getAllRecords(this.table);
         }
         let record = this.cache[id];
         if (!record) {
-            record = this.cache[id] = this.manifest.getRecord(this.table, id);
+            record = this.cache[id] = await this.manifest.getRecord(this.table, id);
         }
-        if (compact) {
+        if (compact && record) {
             return record.displayProperties;
         }
         return record;
@@ -62,17 +62,17 @@ class Manifest {
              */
             this.db = db;
         })
-        this.makeStatement = _.memoize((table) => {
-            return this.db.prepare(`select json from ${table} where id = ?`);
+        this.makeStatement = _.memoize(async (table) => {
+            return await this.db.prepare(`select json from ${table} where id = ?`);
         });
     }
+
 
     /**
      *
      * @param id
-     * @return {*}
+     * @return {Promise<*>}
      */
-
     plugs(id) {
         return this.defs.InventoryItem.get(id);
     }
@@ -80,7 +80,7 @@ class Manifest {
     /**
      *
      * @param  id
-     * @return {DisplayProperties}
+     * @return {Promise<DisplayProperties>}
      */
     damageType(id) {
         return this.defs.DamageType.get(id, true);
@@ -89,7 +89,7 @@ class Manifest {
     /**
      *
      * @param id
-     * @return {*}
+     * @return {Promise<*>}
      */
     inventoryItem(id) {
         return this.defs.InventoryItem.get(id);
@@ -98,7 +98,7 @@ class Manifest {
     /**
      *
      * @param id
-     * @return {DisplayProperties}
+     * @return {Promise<DisplayProperties>}
      */
     stats(id) {
         return this.defs.Stats.get(id, true);
@@ -107,31 +107,31 @@ class Manifest {
     /**
      *
      * @param id
-     * @return {DisplayProperties}
+     * @return {Promise<DisplayProperties>}
      */
     perks(id) {
         return this.defs.Perks.get(id, true);
     }
 
 
-    getRecord(table, id) {
-        const statement = this.makeStatement(table);
+    async getRecord(table, id) {
+        const statement = await this.makeStatement(table);
         // The ID in sqlite is a signed 32-bit int, while the id we
         // use is unsigned, so we must convert
         const sqlId = new Int32Array([id])[0];
-        const result = statement.get([sqlId]);
+        const result = await  statement.get([sqlId]);
         statement.reset();
-        if (result.length) {
-            return JSON.parse(result[0]);
+        if (result && result.json) {
+            return JSON.parse(result.json);
         }
         return null;
     }
 
-    getAllRecords(table) {
-        const rows = this.db.exec(`SELECT json FROM ${table}`);
+    async getAllRecords(table) {
         const result = {};
-        rows[0].values.forEach((row) => {
-            const obj = JSON.parse(row);
+        result.length = await this.db.each(`SELECT json FROM ${table}`, (err, row) => {
+            if (err) return;
+            const obj = JSON.parse(row.json);
             result[obj.hash] = obj;
         });
         return result;

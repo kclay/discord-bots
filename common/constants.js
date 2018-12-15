@@ -1,7 +1,7 @@
 const _ = require('lodash')
 
 const WEAPON_SLOTS = [
-    "primary", "special", "secondary", "heavy", "ghost",
+    "kinetic", "primary", "special", 'energy', "secondary", "heavy", "power", "ghost",
 ];
 const GEAR_SLOTS = [
     "head", "helm", "helmet", "chest", "arm", "arms",
@@ -18,13 +18,18 @@ const XBOX_TYPES = [
 const PSN_TYPES = [
     'psn', 'playstation', 'ps', 'ps3', 'ps4', 'playstation3', 'playstation4'
 ];
+const PC_TYPES = [
+    'pc', 'bnet'
+];
 const PLATFORM_TYPES = [
     ...XBOX_TYPES,
-    ...PSN_TYPES
+    ...PSN_TYPES,
+    ...PC_TYPES
 ];
 const NETWORK_TYPES = {
     XBOX: 1,
-    PSN: 2
+    PSN: 2,
+    PC: 4
 };
 // Mapping from itemCategoryHash to our category strings for filtering.
 const CATEGORY_FROM_HASH = {
@@ -271,6 +276,7 @@ module.exports = {
     ALL_SLOTS,
     XBOX_TYPES,
     PSN_TYPES,
+    PC_TYPES,
     PLATFORM_TYPES,
     NETWORK_TYPES,
     DAMAGE_COLOR,

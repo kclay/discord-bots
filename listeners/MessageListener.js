@@ -9,8 +9,8 @@ class MessageListener extends Listener {
         });
     }
 
-    exec() {
-        console.log(arguments);
+    exec(error) {
+        console.log(error);
     }
 }
 

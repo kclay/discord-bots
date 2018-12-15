@@ -36,5 +36,15 @@ describe('gunsmith', function () {
         const character = await  gunsmith.getEquippedCharacter(player);
         character.membershipType.should.equal(consts.NETWORK_TYPES.PSN);
     })
+    it('should get character items', async () => {
+        const character = {
+            characterId: '2305843009260568745',
+            membershipId: '4611686018433173319',
+            membershipType: 2
+        };
+
+        const items = await gunsmith.getCharacterEquipment(character);
+        items.should.have.length
+    })
 
 });

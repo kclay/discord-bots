@@ -5,6 +5,7 @@ const destiny = require('bungie-api-ts/destiny2');
 const {DestinyComponentType} = consts;
 const {stringify} = require('querystring');
 const httpAdapter = require('../common/bungieHttpAdapter');
+const _ = require('lodash');
 
 
 class Bungie {
@@ -24,7 +25,7 @@ class Bungie {
      * @param {DestinyItemComponent} item
      * @return {{name: *, description: *, itemTypeName: *, color: number, iconLink: string, itemLink: string, talentGrid: DestinyItemTalentGridComponent, damageType: *, stats}}
      */
-    getItemDetails(character, item) {
+    async getItemDetails(character, item) {
         const itemComponents = character.itemComponents;
         const instance = itemComponents.instances.data[item.itemInstanceId];
         const perksDescriptor = itemComponents.perks.data[item.itemInstanceId];
@@ -33,66 +34,101 @@ class Bungie {
         const talentGrid = itemComponents.talentGrids.data[item.itemInstanceId];
 
 
-        const itemDef = this.manifest.inventoryItem(item.itemHash);
+        const itemDef = await this.manifest.inventoryItem(item.itemHash);
 
-        const stats = {};
-        for (let descriptor of Object.values(statsDescriptors)) {
-            const statDef = this.manifest.stats(descriptor.statHash);
-            stats[statDef.name] = descriptor.value;
+        const stats = [];
+        for (let descriptor of Object.values(statsDescriptors.stats)) {
+            const statDef = await this.manifest.stats(descriptor.statHash);
+            if (!statDef) continue;
+            stats.push({
+                name: statDef.name,
+                value: descriptor.value
+            });
         }
-        const perks = {};
+        for (let descriptor of Object.values(itemDef.stats.stats)) {
+            const statDef = await this.manifest.stats(descriptor.statHash);
+            // only aim assist and zoom for now
+            if (![1345609583, 3555269338, 2715839340].includes(descriptor.statHash) || !descriptor.value) {
+                continue;
+            }
+            stats.push({
+                name: statDef.name,
+                value: descriptor.value
+            })
+        }
+        const perks = [];
 
-        for (let descriptor of perksDescriptor.perks) {
-            if (!descriptor.visible || !descriptor.isActive) continue;
-            const perkDef = this.manifest.perks(descriptor.perkHash);
-            perks[perkDef.name] = perkDef.name;
+        if (perksDescriptor) {
+            for (let descriptor of perksDescriptor.perks) {
+                if (!descriptor.visible || !descriptor.isActive) continue;
+                const perkDef = await this.manifest.perks(descriptor.perkHash);
+                if (!perkDef) continue;
+                perks.push({
+                    name: perkDef.name
+                });
+            }
         }
 
         const sockets = [];
 
         for (let descriptor of socketDescriptors.sockets) {
-            let plugDef = this.manifest.plugs(descriptor.plugHash);
+            let plugDef = await this.manifest.plugs(descriptor.plugHash);
             if (!plugDef) continue;
-            if (plugDef.plug.plugCategoryIdentifier === 'shader') continue;
+            const {plugCategoryIdentifier} = plugDef.plug || {};
+            if (plugCategoryIdentifier === 'shader') continue;
             const plugs = [];
-            for (let plugHash of descriptor.reusablePlugHashes) {
-                plugDef = this.manifest.plugs(plugHash);
-                let masterwork = false;
-                if (plugDef.plug.plugCategoryIdentifier.includes('masterworks.')) {
+            const reusablePlugHashes = descriptor.reusablePlugHashes || [descriptor.plugHash];
+            let masterwork = false;
+            for (let plugHash of reusablePlugHashes) {
+                if (masterwork) continue;
+                const reusablePlugDef = await this.manifest.plugs(plugHash);
+
+                if(!reusablePlugDef || !reusablePlugDef.plug){
+                    console.log(plugHash);
+                }
+                if (reusablePlugDef.plug.plugCategoryIdentifier.includes('masterworks.')) {
+                    let stat = reusablePlugDef.plug.plugCategoryIdentifier.split('.').pop().replace('_', ' ');
                     masterwork = {
-                        name: plugDef.plug.plugCategoryIdentifier.split('.').pop(),
+                        name: stat.capitalize(),
                         tier: plugDef.displayProperties.name
                     }
                 }
 
                 const plug = {
-                    perks: (plugDef.perks || perksDescriptor.perks).filter(perk => !!perk.iconPath).map(perk => perk.perkHash)
-                        .map(perkHash => this.manifest.perks(perkHash)),
-                    active: plugDef.hash === descriptor.plugHash,
-                    name: plugDef.displayProperties.name,
+                    perks: await Promise.all((plugDef.perks || perksDescriptor.perks).filter(perk => !!perk.iconPath).map(perk => perk.perkHash)
+                        .map(perkHash => this.manifest.perks(perkHash))),
+                    active: reusablePlugDef.hash === descriptor.plugHash,
+                    name: reusablePlugDef.displayProperties.name,
                     masterwork
                 };
                 plugs.push(plug);
             }
-            sockets.push(plugs);
+
+            if (!plugs.length) continue;
+
+            sockets.push({
+                name: masterwork ? (masterwork.name.includes('Tracker') ? 'Kill Tracker' : 'Masterwork') : plugDef.itemTypeDisplayName,
+                plugs
+            });
+
 
         }
 
-        const damageTypeDef = this.manifest.damageType(instance.damageTypeHash);
+        const damageTypeDef = await this.manifest.damageType(instance.damageTypeHash);
         const damageName = instance
             ? [null, 'kinetic', 'arc', 'solar', 'void', 'raid'][instance.damageType || 0]
             : null;
         let prefix = 'https://www.bungie.net';
-        let iconSuffix = itemDef.icon;
-        let itemSuffix = `/en/Armory/Detail?item=${hash}`;
+        let iconSuffix = itemDef.displayProperties.icon;
+        let itemSuffix = `/en/Armory/Detail?item=${item.itemHash}`;
 
         return {
-            name: itemDef.name,
-            description: itemDef.description,
+            name: itemDef.displayProperties.name,
+            description: itemDef.displayProperties.description,
             itemTypeName: consts.BUCKET_TO_TYPE[item.bucketHash],
             color: parseInt(consts.DAMAGE_COLOR[damageTypeDef.name], 16),
             iconLink: prefix + iconSuffix,
-            itemLink: prefix + itemSuffix,
+            itemLink: `https://db.destinytracker.com/d2/en/items/${item.itemHash}`,
             talentGrid,
             damageName,
             stats,
@@ -143,17 +179,21 @@ class Bungie {
      *
      * @param membershipType
      * @param destinyMembershipId
+     * @param classType
      * @return {Promise<DestinyCharacterComponent>}
      */
-    async getEquippedCharacter(membershipType, destinyMembershipId) {
+    async getEquippedCharacter(membershipType, destinyMembershipId, classType) {
         const characters = await this.getCharacters(membershipType, destinyMembershipId);
-        return characters[0];
+
+        if (!classType) return _.sortBy(characters, ['dateLastPlayed']).reverse()[0];
+        return characters.find(character => character.classType === classType);
+
     }
 
     /**
      *
      * @param {DestinyCharacterComponent} character
-     * @return {Promise<DestinyItemComponent[]>}
+     * @return {Promise<DestinyCharacterResponse>}
      */
     async getCharacterEquipment(character) {
         const response = await destiny.getCharacter(httpAdapter, {
@@ -168,7 +208,7 @@ class Bungie {
                 DestinyComponentType.ItemStats]
         });
         this.validateResponse(response);
-        return response.Response.equipment.data.items;
+        return response.Response;
 
     }
 
@@ -176,11 +216,14 @@ class Bungie {
     getBucketHashFromSlot(slot) {
         switch (slot) {
             case 'primary':
+            case 'kinetic':
                 return consts.TYPE_TO_BUCKET['Kinetic'];
             case 'special':
+            case 'energy':
             case 'secondary':
                 return consts.TYPE_TO_BUCKET['Energy'];
             case 'heavy':
+            case 'power':
                 return consts.TYPE_TO_BUCKET['Power'];
             case 'ghost':
                 return consts.TYPE_TO_BUCKET['Ghost'];
